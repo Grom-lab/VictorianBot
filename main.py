@@ -13,7 +13,6 @@ from telegram.ext import (
 )
 import google.generativeai as genai
 import requests
-from geopy.geocoders import Nominatim
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -53,7 +52,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Введите местоположение:")
+    await update.message.reply_text("Введите название города:")
     return WEATHER_LOCATION
 
 
@@ -62,32 +61,30 @@ async def fetch_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
     loop = asyncio.get_event_loop()
     
     try:
-        # Асинхронный геокодинг
-        geolocator = Nominatim(user_agent="weather_bot")
-        location_data = await loop.run_in_executor(
-            None, geolocator.geocode, user_location
-        )
-        
-        if not location_data:
-            await update.message.reply_text("Местоположение не найдено")
-            return ConversationHandler.END
-
-        # Получение координат
-        lat = round(location_data.latitude, 2)
-        lon = round(location_data.longitude, 2)
-
-        # Асинхронный запрос погоды
-        url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={WEATHER_TOKEN}"
+        # Прямой запрос к OpenWeatherMap API по названию города
+        url = f"http://api.openweathermap.org/data/2.5/weather?q={user_location}&appid={WEATHER_TOKEN}&units=metric&lang=ru"
         response = await loop.run_in_executor(None, requests.get, url)
         
         if response.status_code != 200:
-            await update.message.reply_text("Ошибка при получении данных о погоде")
+            await update.message.reply_text("Местоположение не найдено или произошла ошибка")
             return ConversationHandler.END
 
         # Парсинг ответа
         weather_data = response.json()
-        description = weather_data["list"][0]["weather"][0]["description"]
-        await update.message.reply_text(f"Текущая погода: {description.capitalize()}")
+        description = weather_data["weather"][0]["description"]
+        temperature = weather_data["main"]["temp"]
+        humidity = weather_data["main"]["humidity"]
+        wind_speed = weather_data["wind"]["speed"]
+        
+        # Формирование сообщения
+        weather_message = (
+            f"Погода в {user_location}:\n"
+            f"Описание: {description.capitalize()}\n"
+            f"Температура: {temperature}°C\n"
+            f"Влажность: {humidity}%\n"
+            f"Скорость ветра: {wind_speed} м/с"
+        )
+        await update.message.reply_text(weather_message)
         
     except Exception as e:
         logger.error(f"Ошибка: {e}")
