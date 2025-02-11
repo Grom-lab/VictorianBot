@@ -2,129 +2,125 @@ import os
 import logging
 import requests
 from dotenv import load_dotenv
-from telegram import Update, constants
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    filters,
+    CallbackQueryHandler,
     ContextTypes,
-    ConversationHandler,
+    filters,
 )
-import google.generativeai as genai
 
 # Загрузка переменных окружения из файла .env
 load_dotenv()
 
 # Настройка логирования
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Константы для ConversationHandler
-WEATHER_CITY = 1
-
-# Конфигурация Gemini
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-generation_config = {
-    "temperature": 0.7,
-    "top_p": 0.95,
-    "top_k": 64,
-    "max_output_tokens": 65536,
-    "response_mime_type": "text/plain",
-}
-model = genai.GenerativeModel(
-    model_name="gemini-2.0-flash-thinking-exp-01-21",
-    generation_config=generation_config,
-)
-chat_session = model.start_chat(history=[])
-
-# Команда /start
+# Команда /start с меню
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text('Привет! Я ваш виртуальный ассистент. Чем могу помочь?')
+    keyboard = [
+        [InlineKeyboardButton("🌤 Погода", callback_data="weather")],
+        [InlineKeyboardButton("📰 Новости", callback_data="news")],
+        [InlineKeyboardButton("💰 Криптовалюта", callback_data="crypto")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
-# Обработчик текстовых сообщений
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_chat_action(
-        chat_id=update.effective_chat.id, 
-        action=constants.ChatAction.TYPING
-    )
-    
-    try:
-        response = chat_session.send_message(update.message.text)
-        if len(response.text) > 4096:
-            for part in [response.text[i:i+4096] for i in range(0, len(response.text), 4096)]:
-                await update.message.reply_text(part)
-        else:
-            await update.message.reply_text(response.text)
-    except Exception as e:
-        logger.error(f"Ошибка Gemini: {e}")
-        await update.message.reply_text("Произошла ошибка. Попробуйте позже.")
+# Обработчик кнопок меню
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "weather":
+        await query.message.reply_text("Введите город: /weather <город>")
+    elif query.data == "news":
+        await news(query.message, context)
+    elif query.data == "joke":
+        await joke(query.message, context)
+    elif query.data == "crypto":
+        await crypto(query.message, context)
+    elif query.data == "nasa":
+        await nasa_apod(query.message, context)
 
-# Функции для работы с погодой
-async def weather_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Запуск диалога запроса погоды"""
-    await update.message.reply_text(
-        "Введите название города для получения погоды:"
-    )
-    return WEATHER_CITY
+# Команда /weather
+async def weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    city = " ".join(context.args)
+    if not city:
+        await update.message.reply_text("Пожалуйста, укажите город: /weather <город>")
+        return
 
-async def handle_weather_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка введенного города"""
-    city = update.message.text
-    try:
-        weather_info = get_weather_data(city)
-        await update.message.reply_text(weather_info)
-    except Exception as e:
-        logger.error(f"Ошибка погоды: {e}")
-        await update.message.reply_text("Не удалось получить данные о погоде. Попробуйте еще раз.")
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отмена диалога"""
-    await update.message.reply_text("Запрос погоды отменен.")
-    return ConversationHandler.END
-
-def get_weather_data(city: str) -> str:
-    """Запрос данных о погоде через API"""
-    api_key = os.environ["WEATHER_API_KEY"]
-    url = f"http://api.weatherapi.com/v1/current.json?key={api_key}&q={city}&lang=ru"
-    
+    api_key = os.getenv("OPENWEATHERMAP_API_KEY")
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
     response = requests.get(url)
-    response.raise_for_status()
-    data = response.json()
-    
-    location = data["location"]
-    current = data["current"]
-    
-    return (
-        f"🌤 Погода в {location['name']}, {location['country']}:\n\n"
-        f"🌡 Температура: {current['temp_c']}°C\n"
-        f"💨 Ощущается как: {current['feelslike_c']}°C\n"
-        f"📝 Условия: {current['condition']['text']}\n"
-        f"🌪 Ветер: {current['wind_kph']} км/ч ({current['wind_dir']})\n"
-        f"💧 Влажность: {current['humidity']}%"
-    )
 
+    if response.status_code == 200:
+        data = response.json()
+        temp = data["main"]["temp"]
+        weather_desc = data["weather"][0]["description"]
+        await update.message.reply_text(f"Погода в {city}: {weather_desc}, {temp}°C")
+    else:
+        await update.message.reply_text("Не удалось получить данные о погоде.")
+
+# Команда /news
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    api_key = os.getenv("NEWS_API_KEY")
+    url = f"https://newsapi.org/v2/top-headlines?country=ru&apiKey={api_key}"
+    response = requests.get(url)
+
+    if response.status_code == 200:
+        articles = response.json()["articles"][:5]  # Ограничиваем 5 новостями
+        for article in articles:
+            await update.message.reply_text(f"{article['title']}\n{article['url']}")
+    else:
+        await update.message.reply_text("Не удалось получить новости.")
+
+# Команда /joke
+async def joke(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    response = requests.get("https://v2.jokeapi.dev/joke/Any?lang=ru")
+    if response.status_code == 200:
+        joke_data = response.json()
+        if joke_data["type"] == "single":
+            await update.message.reply_text(joke_data["joke"])
+        else:
+            await update.message.reply_text(f"{joke_data['setup']}\n{joke_data['delivery']}")
+    else:
+        await update.message.reply_text("Не удалось получить шутку.")
+
+# Команда /crypto
+async def crypto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    coin = "bitcoin"
+    response = requests.get(f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd")
+    if response.status_code == 200:
+        price = response.json()[coin]["usd"]
+        await update.message.reply_text(f"Цена Bitcoin: ${price}")
+    else:
+        await update.message.reply_text("Не удалось получить данные о криптовалюте.")
+
+# Команда /nasa
+async def nasa_apod(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    api_key = os.getenv("NASA_API_KEY")
+    response = requests.get(f"https://api.nasa.gov/planetary/apod?api_key={api_key}")
+    if response.status_code == 200:
+        await update.message.reply_photo(response.json()["url"])
+    else:
+        await update.message.reply_text("Не удалось получить изображение дня от NASA.")
+
+# Основная функция
 def main():
-    application = ApplicationBuilder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
+    # Инициализация бота
+    application = ApplicationBuilder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()
 
-    # Добавляем обработчики
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("weather", weather_command)],
-        states={
-            WEATHER_CITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_weather_city)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
+    # Добавление обработчиков
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("weather", weather))
+    application.add_handler(CallbackQueryHandler(button_handler))
 
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler('start', start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-
+    # Запуск бота
     application.run_polling()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
