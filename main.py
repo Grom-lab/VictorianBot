@@ -1,7 +1,7 @@
 import os
 import logging
 from dotenv import load_dotenv
-from telegram import Update, constants, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, constants
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import google.generativeai as genai
 import requests
@@ -34,30 +34,61 @@ model = genai.GenerativeModel(
 # Создание сессии чата
 chat_session = model.start_chat(history=[])
 
-# Функция получения времени по городу
-def get_time(city: str):
-    # Используем TimezoneDB для стабильного получения времени по городам
-    api_key = os.environ["TIMEZONE_API_KEY"]
-    url = f"http://api.timezonedb.com/v2.1/get-time-zone?key={api_key}&format=json&by=city&city={city}"
+# Функция получения погоды
+def get_weather(city: str):
+    url = f"https://api.open-meteo.com/v1/forecast?latitude=0&longitude=0&current_weather=true"
 
+    # Определение координат города через geocode API
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1&language=ru"
+    geo_response = requests.get(geo_url).json()
+
+    if "results" not in geo_response or not geo_response["results"]:
+        return "Не удалось найти город. Попробуйте другой запрос."
+
+    latitude = geo_response["results"][0]["latitude"]
+    longitude = geo_response["results"][0]["longitude"]
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current_weather=true"
+
+    # Получение погоды
     response = requests.get(url).json()
-    if response["status"] != "OK":
-        return f"Не удалось найти информацию о времени для города {city}. Попробуйте другой город."
+    if "current_weather" not in response:
+        return "Ошибка при получении данных о погоде."
 
-    time = response["formatted"]
-    return f"Текущее время в {city}: {time}"
+    weather = response["current_weather"]
+    temperature = weather["temperature"]
+    wind_speed = weather["windspeed"]
+    conditions = weather["weathercode"]
 
-# Функция для главного меню с маленькими кнопками
-def get_main_menu():
-    return ReplyKeyboardMarkup([["Погода", "Время", "Выход"]], resize_keyboard=True)
+    # Простая интерпретация кода погоды
+    weather_conditions = {
+        0: "Ясно",
+        1: "Преимущественно ясно",
+        2: "Переменная облачность",
+        3: "Пасмурно",
+        45: "Туман",
+        48: "Ледяной туман",
+        51: "Легкий моросящий дождь",
+        53: "Моросящий дождь",
+        55: "Сильный моросящий дождь",
+        61: "Легкий дождь",
+        63: "Дождь",
+        65: "Сильный дождь",
+        71: "Легкий снегопад",
+        73: "Снегопад",
+        75: "Сильный снегопад",
+        80: "Легкий ливень",
+        81: "Ливень",
+        82: "Сильный ливень",
+    }
+    
+    weather_desc = weather_conditions.get(conditions, "Неизвестные погодные условия")
+
+    return f"Погода в {city}:\n🌡 Температура: {temperature}°C\n💨 Ветер: {wind_speed} км/ч\n☁️ Условия: {weather_desc}"
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Привет! Я ваш виртуальный ассистент. Чем могу помочь?\n\n"
-        "Выберите одну из опций:",
-        reply_markup=get_main_menu()
-    )
+    await update.message.reply_text("Привет! Я ваш виртуальный ассистент. Чем могу помочь?\n\n"
+                                    "Например, попробуйте /weather Москва")
 
 # Команда /weather
 async def weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -67,24 +98,7 @@ async def weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     city = " ".join(context.args)
     weather_info = get_weather(city)
-    await update.message.reply_text(weather_info, reply_markup=get_main_menu())
-
-# Команда /time
-async def time(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Введите город после команды, например: /time Москва")
-        return
-
-    city = " ".join(context.args)
-    time_info = get_time(city)
-    await update.message.reply_text(time_info, reply_markup=get_main_menu())
-
-# Функция для выхода из меню
-async def exit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "До свидания! Если захотите воспользоваться чем-то снова, просто напишите мне.",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    await update.message.reply_text(weather_info)
 
 # Обработчик текстовых сообщений
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,11 +130,7 @@ def main():
     # Добавление обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("weather", weather))  # Убираем pass_args
-    application.add_handler(CommandHandler("time", time))  # Обработчик команды /time
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
-
-    # Добавление обработчика для кнопки "Выход"
-    application.add_handler(MessageHandler(filters.TEXT & filters.Regex("Выход"), exit_menu))
 
     # Запуск бота
     application.run_polling()
