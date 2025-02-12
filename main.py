@@ -129,7 +129,7 @@ def main():
 
     # Добавление обработчиков
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("weather", weather, pass_args=True))
+    application.add_handler(CommandHandler("weather", weather))  # Убираем pass_args
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), echo))
 
     # Запуск бота
@@ -137,4 +137,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+        
