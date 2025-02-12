@@ -1,8 +1,9 @@
+
 import os
 import logging
 from dotenv import load_dotenv
 from telegram import Update, constants, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 import google.generativeai as genai
 import requests
 
@@ -179,4 +180,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
