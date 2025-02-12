@@ -36,22 +36,20 @@ chat_session = model.start_chat(history=[])
 
 # Функция получения времени по городу
 def get_time(city: str):
-    url = f"http://worldtimeapi.org/api/timezone/Etc/UTC.txt"
-    geo_url = f"http://worldtimeapi.org/api/timezone/{city.replace(' ', '_')}"
-    response = requests.get(geo_url)
+    # Используем TimezoneDB для стабильного получения времени по городам
+    api_key = os.environ["TIMEZONE_API_KEY"]
+    url = f"http://api.timezonedb.com/v2.1/get-time-zone?key={api_key}&format=json&by=city&city={city}"
 
-    if response.status_code != 200:
-        return f"Не удалось получить информацию о времени для города {city}. Попробуйте другой город."
+    response = requests.get(url).json()
+    if response["status"] != "OK":
+        return f"Не удалось найти информацию о времени для города {city}. Попробуйте другой город."
 
-    data = response.json()
-    time = data["datetime"]
-    timezone = data["timezone"]
+    time = response["formatted"]
+    return f"Текущее время в {city}: {time}"
 
-    return f"Текущее время в {city} ({timezone}): {time}"
-
-# Функция для главного меню
+# Функция для главного меню с маленькими кнопками
 def get_main_menu():
-    return ReplyKeyboardMarkup([["/weather", "/time", "Выход"]], one_time_keyboard=True)
+    return ReplyKeyboardMarkup([["Погода", "Время", "Выход"]], resize_keyboard=True)
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
